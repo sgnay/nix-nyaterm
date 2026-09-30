@@ -1,0 +1,89 @@
+name: Nix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - ".github/workflows/nix.yml"
+  pull_request:
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - ".github/workflows/nix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flake-check:
+    name: Nix Flake Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v9
+
+      - name: Check flake outputs on supported systems
+        run: nix flake check --all-systems --no-build
+
+  build:
+    name: Build Linux (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux
+            os: ubuntu-latest
+            pkg: .#packages.x86_64-linux.nyaterm
+          - target: aarch64-linux
+            os: ubuntu-24.04-arm
+            pkg: .#packages.aarch64-linux.nyaterm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v9
+
+      - name: Build NyaTerm package
+        run: nix build ${{ matrix.pkg }} -L
+
+      - name: Verify package and embedded frontend assets
+        run: |
+          test -x result/bin/nyaterm
+          test -x result/bin/nyaterm-mcp
+          test -f result/share/applications/nyaterm.desktop
+          test -f result/share/icons/hicolor/32x32/apps/nyaterm.png
+          test -f result/share/icons/hicolor/128x128/apps/nyaterm.png
+          test -f result/share/icons/hicolor/256x256/apps/nyaterm.png
+          if ! grep -rqa -- '/assets/' result/bin; then
+            echo "Frontend assets are not embedded in result/bin" >&2
+            exit 1
+          fi
+          echo "All required package outputs verified successfully."
