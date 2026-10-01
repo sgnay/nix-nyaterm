@@ -58,9 +58,27 @@ nix develop
 
 Then work in a clone of the NyaTerm source repository from the shell.
 
+## Updating to a new NyaTerm release
+
+The source stays pinned to a release tag so builds remain reproducible, so something has to move that pin. One command does it:
+
+```bash
+./scripts/update-upstream.sh          # update the working tree, leave the commit to you
+./scripts/update-upstream.sh --commit # update and commit
+```
+
+It advances the tag to the newest release on the same line, refreshes `flake.lock`, then adopts each fixed-output hash Nix reports until the build is clean. Anything else that fails the build is reported as-is instead of being patched around.
+
+`Update NyaTerm` (`.github/workflows/update.yml`) runs this weekly and opens a pull request when a bump lands, so the usual workflow is review and merge. The pin is only bumped within the current release line; the script warns when a new major/minor line appears rather than jumping to it.
+
+Only the fixed-output hashes normally change. The version comes from `package.json` and the Cargo lock is read from the source, so neither needs editing. Two caveats worth knowing:
+
+- The pin must ship `src-tauri/crates/nyaterm-mcp`, since that crate is built and installed as the bundled MCP sidecar. Revisions before `v1.2.6` cannot be packaged.
+- `v2.0.0-preview.*` is a pure-Rust rewrite with a different tree layout (no `src-tauri/`), so it needs `nix/package.nix` rewritten by hand rather than a hash bump.
+
 ## Maintainer note
 
-The `nyaterm-src` input points at the `nyakang/nyaterm` upstream release tag. The pin must be a tag or revision that ships `src-tauri/crates/nyaterm-mcp`, since that crate is built and installed as the bundled MCP sidecar; older revisions predating the MCP support cannot be packaged.
+The `nyaterm-src` input points at the `nyakang/nyaterm` upstream release tag.
 
 To build against an in-development branch or a local checkout without changing the committed lock file, override the input:
 
@@ -68,5 +86,3 @@ To build against an in-development branch or a local checkout without changing t
 nix build .#nyaterm --override-input nyaterm-src github:nyakang/nyaterm/main --no-write-lock-file
 nix build .#nyaterm --override-input nyaterm-src path:/path/to/nyaterm --no-write-lock-file
 ```
-
-To move to a newer NyaTerm release, edit the tag in `flake.nix` and run `nix flake update nyaterm-src` to refresh `flake.lock` before publishing this package.

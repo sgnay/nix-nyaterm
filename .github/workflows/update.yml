@@ -1,0 +1,78 @@
+name: Update NyaTerm
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-nyaterm
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Bump pinned NyaTerm release
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v9
+
+      - name: Record base revision
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+      # Bumps the release tag, refreshes the lock file and adopts any fixed-output
+      # hash Nix reports. Exits non-zero on a real build break so no PR is opened.
+      - name: Update pinned upstream release
+        run: ./scripts/update-upstream.sh --commit
+
+      - name: Verify package outputs
+        run: |
+          test -x result/bin/nyaterm
+          test -x result/bin/nyaterm-mcp
+          test -f result/share/applications/nyaterm.desktop
+
+      - name: Open pull request
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$BASE_SHA" ]; then
+            echo "The pin is already current; nothing to open."
+            exit 0
+          fi
+          branch="chore/update-nyaterm-$(date -u +%Y%m%d)"
+          git checkout -b "$branch"
+          git push -u origin "$branch"
+          gh pr create \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "$branch" \
+            --title "chore(nix): update NyaTerm" \
+            --body "$(cat <<'BODY'
+          Automated bump of the pinned NyaTerm upstream release.
+
+          Opened by `scripts/update-upstream.sh`, which advanced the release tag,
+          refreshed `flake.lock`, adopted the fixed-output hashes Nix reported, and
+          built the package successfully.
+
+          Review `flake.nix`, `flake.lock` and `nix/package.nix`. If the tag jumped
+          to a new major/minor line, the upstream tree layout changed and this needs
+          a real review rather than a hash bump.
+
+          The full build matrix runs on this PR via `nix.yml`.
+          BODY
+          )"
