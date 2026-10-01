@@ -1,0 +1,169 @@
+name: Update NyaTerm
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+# Baseline for any job below that does not declare its own block. A job-level
+# `permissions` key replaces this outright rather than merging with it, and an
+# unspecified scope becomes `none`.
+permissions:
+  contents: read
+
+concurrency:
+  group: update-nyaterm
+  cancel-in-progress: false
+
+env:
+  # Fixed name so a re-run updates the existing PR instead of opening duplicates.
+  UPDATE_BRANCH: chore/update-nyaterm
+
+jobs:
+  update:
+    name: Bump pinned NyaTerm release
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write # pushes the update branch
+      id-token: write # Magic Nix Cache OIDC login
+    outputs:
+      pushed: ${{ steps.push.outputs.pushed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v9
+
+      # actions/checkout configures credentials but no commit identity, and
+      # --commit runs `git commit`, so this has to be set explicitly.
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Record base revision
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+      # Bumps the release tag, refreshes the lock file and adopts any fixed-output
+      # hash Nix reports. Exits non-zero on a real build break so no PR is opened.
+      - name: Update pinned upstream release
+        run: ./scripts/update-upstream.sh --commit
+
+      - name: Verify package outputs
+        run: ./scripts/verify-package.sh
+
+      - name: Publish update branch
+        id: push
+        run: |
+          if [ "$(git rev-parse HEAD)" = "${{ steps.base.outputs.sha }}" ]; then
+            echo "The pin is already current; nothing to open."
+            echo "pushed=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git checkout -B "$UPDATE_BRANCH"
+          # Force so a re-run on an existing branch succeeds rather than failing
+          # on a non-fast-forward push.
+          git push --force -u origin "$UPDATE_BRANCH"
+          echo "pushed=true" >>"$GITHUB_OUTPUT"
+
+  verify:
+    name: Build Linux (${{ matrix.target }})
+    needs: update
+    if: needs.update.outputs.pushed == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read # checkout and build only; never pushes
+      id-token: write # Magic Nix Cache OIDC login
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux
+            os: ubuntu-latest
+          - target: aarch64-linux
+            os: ubuntu-24.04-arm
+    steps:
+      - name: Checkout update branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.UPDATE_BRANCH }}
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v9
+
+      # Built here because a PR opened with GITHUB_TOKEN does not trigger the
+      # pull_request branch of nix.yml, so that matrix never runs for it.
+      - name: Build NyaTerm package
+        run: nix build .#nyaterm -L
+
+      - name: Verify package outputs
+        run: ./scripts/verify-package.sh
+
+  open-pr:
+    name: Open pull request
+    needs: [update, verify]
+    # verify is skipped when nothing was pushed, so only gate on `update` here.
+    if: needs.update.outputs.pushed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # `gh pr create --head` skips pushing entirely, so no write access to
+    # contents is needed here.
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout update branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.UPDATE_BRANCH }}
+          persist-credentials: false
+
+      - name: Create or refresh pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh pr list --head "$UPDATE_BRANCH" --state open \
+            --json number --jq '.[].number')
+          if [ -n "$existing" ]; then
+            echo "PR #$existing is already open on this branch; it now carries the latest bump."
+            exit 0
+          fi
+          gh pr create \
+            --base "${{ github.event.repository.default_branch || 'main' }}" \
+            --head "$UPDATE_BRANCH" \
+            --title "chore(nix): update NyaTerm" \
+            --body "$(cat <<'BODY'
+          Automated bump of the pinned NyaTerm upstream release.
+
+          Opened by `scripts/update-upstream.sh`, which advanced the release tag,
+          refreshed `flake.lock`, adopted the fixed-output hashes Nix reported, and
+          built successfully. Both Linux architectures were built and verified before
+          this PR was opened.
+
+          Note: this PR was opened with the default `GITHUB_TOKEN`, which does not
+          trigger `pull_request` workflows, so the `nix.yml` matrix does not run on
+          it. The equivalent matrix runs in the `Update NyaTerm` workflow instead,
+          and `nix.yml` will run normally once a human pushes to this branch.
+
+          Review `flake.nix`, `flake.lock` and `nix/package.nix`. If the tag jumped
+          to a new major/minor line, the upstream tree layout changed and this needs
+          a real review rather than a hash bump.
+          BODY
+          )"
