@@ -5,9 +5,11 @@ on:
     - cron: "17 3 * * 1"
   workflow_dispatch:
 
+# Baseline for any job below that does not declare its own block. A job-level
+# `permissions` key replaces this outright rather than merging with it, and an
+# unspecified scope becomes `none`.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: update-nyaterm
@@ -22,6 +24,9 @@ jobs:
     name: Bump pinned NyaTerm release
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: write # pushes the update branch
+      id-token: write # Magic Nix Cache OIDC login
     outputs:
       pushed: ${{ steps.push.outputs.pushed }}
     steps:
@@ -58,8 +63,6 @@ jobs:
 
       - name: Publish update branch
         id: push
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$(git rev-parse HEAD)" = "${{ steps.base.outputs.sha }}" ]; then
             echo "The pin is already current; nothing to open."
@@ -78,6 +81,9 @@ jobs:
     if: needs.update.outputs.pushed == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    permissions:
+      contents: read # checkout and build only; never pushes
+      id-token: write # Magic Nix Cache OIDC login
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +97,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: chore/update-nyaterm
+          persist-credentials: false
 
       - name: Install Nix
         uses: cachix/install-nix-action@v30
@@ -116,11 +123,17 @@ jobs:
     if: needs.update.outputs.pushed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # `gh pr create --head` skips pushing entirely, so no write access to
+    # contents is needed here.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout update branch
         uses: actions/checkout@v4
         with:
           ref: ${{ env.UPDATE_BRANCH }}
+          persist-credentials: false
 
       - name: Create or refresh pull request
         env:
