@@ -15,7 +15,7 @@ nix run github:nyakang/nix-nyaterm
 安装到当前用户的 profile：
 
 ```bash
-nix profile install github:nyakang/nix-nyaterm
+nix profile add github:nyakang/nix-nyaterm
 ```
 
 软件包支持 `x86_64-linux` 和 `aarch64-linux`，包含 MCP sidecar、桌面入口、图标，以及 `nyaterm://`、`ssh://` 和 `telnet://` 协议处理器。软件包更新由 Nix 管理，因此通过 Nix 构建的 NyaTerm 会禁用应用内更新界面。

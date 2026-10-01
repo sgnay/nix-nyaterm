@@ -15,7 +15,7 @@ nix run github:nyakang/nix-nyaterm
 Install into the current user's profile:
 
 ```bash
-nix profile install github:nyakang/nix-nyaterm
+nix profile add github:nyakang/nix-nyaterm
 ```
 
 The package supports `x86_64-linux` and `aarch64-linux`. It bundles the MCP sidecar, a desktop entry, icons, and handlers for `nyaterm://`, `ssh://`, and `telnet://`. Nix manages package updates; NyaTerm's in-app update UI is disabled for Nix-built packages.
