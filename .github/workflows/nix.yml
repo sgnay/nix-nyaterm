@@ -7,12 +7,14 @@ on:
       - "flake.nix"
       - "flake.lock"
       - "nix/**"
+      - "scripts/**"
       - ".github/workflows/nix.yml"
   pull_request:
     paths:
       - "flake.nix"
       - "flake.lock"
       - "nix/**"
+      - "scripts/**"
       - ".github/workflows/nix.yml"
   workflow_dispatch:
 
@@ -74,16 +76,5 @@ jobs:
       - name: Build NyaTerm package
         run: nix build ${{ matrix.pkg }} -L
 
-      - name: Verify package and embedded frontend assets
-        run: |
-          test -x result/bin/nyaterm
-          test -x result/bin/nyaterm-mcp
-          test -f result/share/applications/nyaterm.desktop
-          test -f result/share/icons/hicolor/32x32/apps/nyaterm.png
-          test -f result/share/icons/hicolor/128x128/apps/nyaterm.png
-          test -f result/share/icons/hicolor/256x256/apps/nyaterm.png
-          if ! grep -rqa -- '/assets/' result/bin; then
-            echo "Frontend assets are not embedded in result/bin" >&2
-            exit 1
-          fi
-          echo "All required package outputs verified successfully."
+      - name: Verify package outputs
+        run: ./scripts/verify-package.sh

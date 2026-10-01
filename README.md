@@ -69,7 +69,7 @@ The source stays pinned to a release tag so builds remain reproducible, so somet
 
 It advances the tag to the newest release on the same line, refreshes `flake.lock`, then adopts each fixed-output hash Nix reports until the build is clean. Anything else that fails the build is reported as-is instead of being patched around.
 
-`Update NyaTerm` (`.github/workflows/update.yml`) runs this weekly and opens a pull request when a bump lands, so the usual workflow is review and merge. The pin is only bumped within the current release line; the script warns when a new major/minor line appears rather than jumping to it.
+`Update NyaTerm` (`.github/workflows/update.yml`) runs this weekly and opens a pull request when a bump lands, so the usual workflow is review and merge. It always pushes to the fixed branch `chore/update-nyaterm` and reuses the open pull request on that branch rather than opening duplicates, so an unmerged bump simply gets refreshed. Because a pull request created with the default `GITHUB_TOKEN` does not trigger `pull_request` workflows, that workflow builds both architectures itself before opening the pull request. The pin is only bumped within the current release line; the script warns when a new major/minor line appears rather than jumping to it.
 
 Only the fixed-output hashes normally change. The version comes from `package.json` and the Cargo lock is read from the source, so neither needs editing. Two caveats worth knowing:
 
