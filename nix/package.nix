@@ -65,12 +65,8 @@ let
       inherit version src;
       pnpm = pnpm_10;
       fetcherVersion = 4;
-      hash = "sha256-2Qtar7sVKGGhWR2vQsKH4UyUN7WiOoaqKCZcw6IDD1A=";
       # A fixed hash verifies the fetched package contents.
-      prePnpmInstall = ''
-        echo registry=https://registry.npmmirror.com >> ~/.npmrc
-        echo registry=https://registry.npmmirror.com >> .npmrc
-      '';
+      hash = "sha256-2Qtar7sVKGGhWR2vQsKH4UyUN7WiOoaqKCZcw6IDD1A=";
     };
 
     nativeBuildInputs = [
