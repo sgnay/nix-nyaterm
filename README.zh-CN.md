@@ -18,7 +18,7 @@ nix run github:nyakang/nix-nyaterm
 nix profile add github:nyakang/nix-nyaterm
 ```
 
-软件包支持 `x86_64-linux` 和 `aarch64-linux`，包含 MCP sidecar、桌面入口、图标，以及 `nyaterm://`、`ssh://` 和 `telnet://` 协议处理器。软件包更新由 Nix 管理，因此通过 Nix 构建的 NyaTerm 会禁用应用内更新界面。
+软件包支持 `x86_64-linux` 和 `aarch64-linux`，包含 MCP sidecar、桌面入口、图标，以及 `nyaterm://`、`ssh://` 和 `telnet://` 协议处理器。软件包更新由 Nix 管理。构建时注入了 `NYATERM_PACKAGE_MANAGER=nix`，但上游版本尚未读取该变量；应用内更新界面依然存在并可检查新版本，只是无法替换 `/nix/store` 中的只读二进制。
 
 默认软件包不包含 GitHub OAuth Client ID；除非覆盖设置 `githubGistClientId`，否则无法使用 GitHub Gist Device Flow 授权。WebDAV 和 S3 同步不需要此设置。Termius 凭据导入依赖 Secret Service；如需使用该导入功能，请确保桌面环境提供了 Secret Service 实现。
 

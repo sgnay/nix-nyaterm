@@ -18,7 +18,7 @@ Install into the current user's profile:
 nix profile add github:nyakang/nix-nyaterm
 ```
 
-The package supports `x86_64-linux` and `aarch64-linux`. It bundles the MCP sidecar, a desktop entry, icons, and handlers for `nyaterm://`, `ssh://`, and `telnet://`. Nix manages package updates; NyaTerm's in-app update UI is disabled for Nix-built packages.
+The package supports `x86_64-linux` and `aarch64-linux`. It bundles the MCP sidecar, a desktop entry, icons, and handlers for `nyaterm://`, `ssh://`, and `telnet://`. Nix manages package updates. The build sets `NYATERM_PACKAGE_MANAGER=nix`, which upstream releases do not read yet; the in-app updater remains present and can check for releases, but cannot replace the binary because `/nix/store` is read-only.
 
 The default package does not contain a GitHub OAuth Client ID, so GitHub Gist Device Flow authorization is unavailable unless you override `githubGistClientId`. WebDAV and S3 sync do not require this setting. Termius credential import uses Secret Service; provide a Secret Service implementation in your desktop environment if you need that import path.
 

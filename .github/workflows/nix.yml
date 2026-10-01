@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write # Magic Nix Cache OIDC login
 
 concurrency:
   group: nix-${{ github.ref }}

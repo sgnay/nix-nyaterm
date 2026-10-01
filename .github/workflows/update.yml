@@ -96,7 +96,7 @@ jobs:
       - name: Checkout update branch
         uses: actions/checkout@v4
         with:
-          ref: chore/update-nyaterm
+          ref: ${{ env.UPDATE_BRANCH }}
           persist-credentials: false
 
       - name: Install Nix
@@ -146,7 +146,7 @@ jobs:
             exit 0
           fi
           gh pr create \
-            --base "${{ github.event.repository.default_branch }}" \
+            --base "${{ github.event.repository.default_branch || 'main' }}" \
             --head "$UPDATE_BRANCH" \
             --title "chore(nix): update NyaTerm" \
             --body "$(cat <<'BODY'

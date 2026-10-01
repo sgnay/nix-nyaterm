@@ -94,7 +94,7 @@
               pkg-config
             ];
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath package.buildInputs;
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (map (p: p.lib or p.out or p) package.buildInputs);
           };
         }
       );

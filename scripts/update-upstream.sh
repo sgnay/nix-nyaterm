@@ -122,9 +122,7 @@ done
 
 [ "$built" -eq 1 ] || die "gave up after ${MAX_HASH_ROUNDS} hash rounds"
 
-for f in bin/nyaterm bin/nyaterm-mcp share/applications/nyaterm.desktop; do
-  [ -e "${ROOT}/result/$f" ] || die "expected output missing: result/$f"
-done
+"${ROOT}/scripts/verify-package.sh" "${ROOT}/result"
 
 log "build OK, package outputs verified"
 
