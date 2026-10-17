@@ -58,9 +58,6 @@ jobs:
       - name: Update pinned upstream release
         run: ./scripts/update-upstream.sh --commit
 
-      - name: Verify package outputs
-        run: ./scripts/verify-package.sh
-
       - name: Publish update branch
         id: push
         run: |
@@ -114,7 +111,7 @@ jobs:
         run: nix build .#nyaterm -L
 
       - name: Verify package outputs
-        run: ./scripts/verify-package.sh
+        run: nix build .#checks.${{ matrix.target }}.nyaterm -L
 
   open-pr:
     name: Open pull request

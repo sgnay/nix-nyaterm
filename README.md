@@ -67,7 +67,7 @@ The source stays pinned to a release tag so builds remain reproducible, so somet
 ./scripts/update-upstream.sh --commit # update and commit (managed files must be clean)
 ```
 
-It advances the tag to the newest stable `vX.Y.Z` release across all major/minor lines; pre-release tags are skipped. It refreshes `flake.lock`, then adopts each fixed-output hash Nix reports until the build is clean. Anything else that fails the build is reported as-is instead of being patched around.
+It advances the tag to the newest stable `vX.Y.Z` release across all major/minor lines; pre-release tags are skipped. It refreshes `flake.lock`, then adopts each fixed-output hash Nix reports until the build is clean. Anything else that fails the build is reported as-is instead of being patched around. It finally builds `.#checks.<system>.nyaterm`, which asserts the package outputs, so a bump that loses a file fails the run instead of reaching a pull request.
 
 `Update NyaTerm` (`.github/workflows/update.yml`) runs this weekly and opens a pull request when a bump lands, so the usual workflow is review and merge. It always pushes to the fixed branch `chore/update-nyaterm` and reuses the open pull request on that branch rather than opening duplicates, so an unmerged bump simply gets refreshed. Because a pull request created with the default `GITHUB_TOKEN` does not trigger `pull_request` workflows, that workflow builds both architectures itself before opening the pull request. The build must pass before an update is committed or a pull request is opened; a release with an incompatible source layout needs a package-expression update rather than a hash change.
 

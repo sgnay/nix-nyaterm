@@ -65,7 +65,8 @@ let
       inherit version src;
       pnpm = pnpm_10;
       fetcherVersion = 4;
-      # A fixed hash verifies the fetched package contents.
+      # A fixed hash verifies the fetched package contents. scripts/update-upstream.sh
+      # rewrites the hash inside this fetchPnpmDeps block when upstream moves.
       hash = "sha256-8GSbrUWQD3q9BqAFc6qC7RD6NlBi/IdnTO7k7ZySl1M=";
     };
 

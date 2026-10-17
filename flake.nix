@@ -28,6 +28,13 @@
         "aarch64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      lib = nixpkgs.lib;
+      pkgsFor =
+        system:
+        import nixpkgs {
+          inherit system;
+          overlays = [ self.overlays.default ];
+        };
       packageFor =
         pkgs:
         pkgs.callPackage ./nix/package.nix {
@@ -45,10 +52,7 @@
       packages = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [ self.overlays.default ];
-          };
+          pkgs = pkgsFor system;
         in
         {
           nyaterm = pkgs.nyaterm;
@@ -65,19 +69,55 @@
         default = self.apps.${system}.nyaterm;
       });
 
-      checks = forAllSystems (system: {
-        nyaterm = self.packages.${system}.nyaterm;
-      });
+      # Assertions on the built package, so `nix flake check` and
+      # `nix build .#checks.<system>.nyaterm` catch a package that lost an
+      # output or shipped a binary that reads its frontend from disk.
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = pkgsFor system;
+          package = self.packages.${system}.nyaterm;
+          requiredPaths = [
+            "bin/nyaterm"
+            "bin/nyaterm-mcp"
+            "share/applications/nyaterm.desktop"
+            "share/icons/hicolor/32x32/apps/nyaterm.png"
+            "share/icons/hicolor/128x128/apps/nyaterm.png"
+            "share/icons/hicolor/256x256/apps/nyaterm.png"
+          ];
+        in
+        {
+          nyaterm = pkgs.runCommand "nyaterm-outputs-check"
+            {
+              nativeBuildInputs = [ pkgs.gnugrep ];
+            } ''
+            status=0
+            for path in ${lib.concatMapStringsSep " " lib.escapeShellArg requiredPaths}; do
+              if [ ! -e "${package}/$path" ]; then
+                echo "error: expected package output missing: $path" >&2
+                status=1
+              fi
+            done
+
+            # The frontend must be embedded in the binary, not read from a source tree.
+            if ! grep -rqa -- '/assets/' "${package}/bin"; then
+              echo "error: frontend assets are not embedded in ${package}/bin" >&2
+              status=1
+            fi
+
+            [ "$status" -eq 0 ] || exit 1
+            echo "verified package outputs in ${package}"
+            touch $out
+          '';
+        }
+      );
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
 
       devShells = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [ self.overlays.default ];
-          };
+          pkgs = pkgsFor system;
           package = pkgs.nyaterm;
         in
         {

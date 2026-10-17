@@ -113,7 +113,11 @@ done
 
 [ "$built" -eq 1 ] || die "gave up after ${MAX_HASH_ROUNDS} hash rounds"
 
-"${ROOT}/scripts/verify-package.sh" "${ROOT}/result"
+log "verifying package outputs"
+system=$(nix eval --impure --raw --expr builtins.currentSystem) \
+  || die "could not determine the current system"
+(cd "$ROOT" && nix build --no-link ".#checks.${system}.nyaterm" -L) \
+  || die "package outputs failed verification"
 
 log "build OK, package outputs verified"
 
