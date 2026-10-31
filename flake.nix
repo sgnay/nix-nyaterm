@@ -3,24 +3,28 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # Upstream NyaTerm source, pinned to a release tag so the packaged
-    # MCP sidecar (src-tauri/crates/nyaterm-mcp) is always present.
-    # Bump with `nix flake update nyaterm-src` after moving this to a newer tag.
-    # For local debugging against another branch or a local checkout, override
-    # without touching the lockfile:
+    # Upstream NyaTerm source, pinned to an immutable commit so builds stay
+    # reproducible. Tag `v2.0.0` predates the commit that teaches the binary to
+    # honor NYATERM_PACKAGE_MANAGER, so the pin follows `main` until the next
+    # v2.x.y release carries it; scripts/update-upstream.sh then advances the
+    # pin tag by tag.
+    #
+    # For local debugging against another ref or a local checkout, override the
+    # input without touching the lockfile:
     #   nix build .#nyaterm --override-input nyaterm-src \
     #     github:nyakang/nyaterm/main --no-write-lock-file
+    #   nix build .#nyaterm --override-input nyaterm-src path:/path/to/nyaterm
     nyaterm-src = {
-      url = "github:nyakang/nyaterm/v1.3.2";
+      url = "github:nyakang/nyaterm/cc35a5f93a7f6f9b129aa98af07b0185c8b39468";
       flake = false;
     };
   };
 
   outputs =
-    { self
-    , nixpkgs
-    , nyaterm-src
-    ,
+    {
+      self,
+      nixpkgs,
+      nyaterm-src,
     }:
     let
       supportedSystems = [
@@ -71,7 +75,9 @@
 
       # Assertions on the built package, so `nix flake check` and
       # `nix build .#checks.<system>.nyaterm` catch a package that lost an
-      # output or shipped a binary that reads its frontend from disk.
+      # output. The application spawns its helpers from its own directory, so a
+      # missing nyaterm-mcp, -rdp-helper or -vnc-helper breaks features only at
+      # runtime and has to be caught here.
       checks = forAllSystems (
         system:
         let
@@ -80,17 +86,18 @@
           requiredPaths = [
             "bin/nyaterm"
             "bin/nyaterm-mcp"
+            "bin/nyaterm-rdp-helper"
+            "bin/nyaterm-vnc-helper"
             "share/applications/nyaterm.desktop"
             "share/icons/hicolor/32x32/apps/nyaterm.png"
+            "share/icons/hicolor/64x64/apps/nyaterm.png"
             "share/icons/hicolor/128x128/apps/nyaterm.png"
             "share/icons/hicolor/256x256/apps/nyaterm.png"
+            "share/icons/hicolor/512x512/apps/nyaterm.png"
           ];
         in
         {
-          nyaterm = pkgs.runCommand "nyaterm-outputs-check"
-            {
-              nativeBuildInputs = [ pkgs.gnugrep ];
-            } ''
+          nyaterm = pkgs.runCommand "nyaterm-outputs-check" { } ''
             status=0
             for path in ${lib.concatMapStringsSep " " lib.escapeShellArg requiredPaths}; do
               if [ ! -e "${package}/$path" ]; then
@@ -99,11 +106,11 @@
               fi
             done
 
-            # The frontend must be embedded in the binary, not read from a source tree.
-            if ! grep -rqa -- '/assets/' "${package}/bin"; then
-              echo "error: frontend assets are not embedded in ${package}/bin" >&2
-              status=1
-            fi
+            # The embedded UI assets get no assertion here: their paths also
+            # occur as ordinary string literals in the binary (`"icons/..."`
+            # in nyaterm-desktop), so a grep cannot tell an embedded asset
+            # from a reference to one, and rust-embed turns a missing
+            # `assets/` tree into a compile error in the first place.
 
             [ "$status" -eq 0 ] || exit 1
             echo "verified package outputs in ${package}"
@@ -112,7 +119,7 @@
         }
       );
 
-      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
+      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-tree);
 
       devShells = forAllSystems (
         system:
@@ -124,17 +131,19 @@
           default = pkgs.mkShell {
             inputsFrom = [ package ];
             packages = with pkgs; [
-              cargo-tauri
-              pnpm_10
-              nodejs
               rustc
               cargo
               rustfmt
               clippy
-              pkg-config
             ];
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (map (p: p.lib or p.out or p) package.buildInputs);
+            # `inputsFrom` only propagates the package's build inputs; GPUI's
+            # Vulkan backend `dlopen`s libvulkan.so.1, and the package itself
+            # supplies it through its wrapper rather than a build input. Add it
+            # here so `cargo run` works without a system Vulkan loader.
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+              [ pkgs.vulkan-loader ] ++ map (p: p.lib or p.out or p) package.buildInputs
+            );
           };
         }
       );

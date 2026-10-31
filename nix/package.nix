@@ -1,147 +1,116 @@
-{ lib
-, stdenv
-, rustPlatform
-, fetchPnpmDeps
-, pnpmConfigHook
-, nodejs
-, pnpm_10
-, pkg-config
-, wrapGAppsHook3
-, gtk3
-, webkitgtk_4_1
-, libsoup_3
-, libappindicator-gtk3
-, libayatana-appindicator
-, librsvg
-, openssl
-, udev
-, xdg-utils
-, desktop-file-utils
-, cacert
-, copyDesktopItems
-, makeDesktopItem
-, nyaterm-src
-, githubGistClientId ? null
-,
+{
+  lib,
+  rustPlatform,
+  pkg-config,
+  wrapGAppsHook3,
+  copyDesktopItems,
+  makeDesktopItem,
+  cmake,
+  gtk3,
+  glib,
+  dbus,
+  libayatana-appindicator,
+  fontconfig,
+  freetype,
+  libx11,
+  libxcb,
+  libxkbcommon,
+  libxext,
+  wayland,
+  vulkan-loader,
+  xdg-utils,
+  cacert,
+  nyaterm-src,
+  githubGistClientId ? null,
 }:
 
+# NyaTerm 2.x is a pure-Rust GPUI application: one Cargo workspace builds the
+# application and the helper processes it spawns, and every frontend asset is
+# embedded by `rust-embed` at compile time. There is no pnpm/Node build step and
+# no separate sidecar crate to package.
 let
-  packageJson = builtins.fromJSON (builtins.readFile "${nyaterm-src}/package.json");
-  version = packageJson.version;
+  cargoToml = builtins.fromTOML (builtins.readFile "${nyaterm-src}/Cargo.toml");
+  version = cargoToml.workspace.package.version;
   src = lib.cleanSourceWith {
     src = nyaterm-src;
-    filter = path: type:
+    filter =
+      path: type:
       let
         baseName = baseNameOf path;
       in
-        !(
-          baseName == "target" ||
-          baseName == "node_modules" ||
-          baseName == "dist" ||
-          baseName == ".git" ||
-          lib.hasPrefix "result" baseName
-        );
+      !(
+        baseName == "target"
+        || baseName == ".git"
+        || baseName == "result"
+        || lib.hasPrefix "result-" baseName
+        # Upstream keeps untracked reference checkouts in `temp/` (see the
+        # `exclude` list in its Cargo.toml). The pinned source never contains it;
+        # pruning it here keeps a local `path:` checkout from changing what the
+        # build sees. Nix copies the input tree into the store before this filter
+        # runs, so this trims the build, not that initial copy.
+        || baseName == "temp"
+      );
   };
-
-  mcpSidecar = rustPlatform.buildRustPackage {
-    pname = "nyaterm-mcp";
-    inherit version src;
-
-    cargoLock = {
-      lockFile = "${nyaterm-src}/src-tauri/crates/nyaterm-mcp/Cargo.lock";
-    };
-    cargoRoot = "src-tauri/crates/nyaterm-mcp";
-    buildAndTestSubdir = "src-tauri/crates/nyaterm-mcp";
-
-    doCheck = false;
-  };
-
-  frontend = stdenv.mkDerivation {
-    pname = "nyaterm-frontend";
-    inherit version src;
-
-    pnpmDeps = fetchPnpmDeps {
-      pname = "nyaterm";
-      inherit version src;
-      pnpm = pnpm_10;
-      fetcherVersion = 4;
-      # A fixed hash verifies the fetched package contents. scripts/update-upstream.sh
-      # rewrites the hash inside this fetchPnpmDeps block when upstream moves.
-      hash = "sha256-8GSbrUWQD3q9BqAFc6qC7RD6NlBi/IdnTO7k7ZySl1M=";
-    };
-
-    nativeBuildInputs = [
-      nodejs
-      pnpm_10
-      pnpmConfigHook
-    ];
-
-    preBuild = ''
-      # pnpmConfigHook skips the root postinstall script in the Nix sandbox.
-      pnpm run postinstall
-    '';
-
-    buildPhase = ''
-      runHook preBuild
-      pnpm exec tsc
-      pnpm exec vite build
-      runHook postBuild
-    '';
-
-    installPhase = ''
-      runHook preInstall
-      mkdir -p $out
-      cp -r dist/. $out
-      runHook postInstall
-    '';
-  };
+  icons = "${src}/crates/nyaterm-app/resources/icons";
 in
 rustPlatform.buildRustPackage {
   pname = "nyaterm";
   inherit version src;
 
-  cargoLock = {
-    lockFile = "${nyaterm-src}/src-tauri/Cargo.lock";
-  };
-  cargoRoot = "src-tauri";
-  cargoBuildFlags = [ "--features=tauri/custom-protocol" ];
-  buildAndTestSubdir = "src-tauri";
+  # The dependency graph is pinned by `Cargo.lock`, but it also contains git
+  # dependencies (gpui, russh, IronRDP, ...) whose trees have no checksum in the
+  # lock file, so the vendored sources are fetched as one fixed-output
+  # derivation. scripts/update-upstream.sh adopts the hash Nix reports.
+  cargoHash = "sha256-S50EQYVtgsNIhsPxbX4kHLJr27Xk5M9aDTeE200iWdY=";
 
   nativeBuildInputs = [
     pkg-config
     wrapGAppsHook3
     copyDesktopItems
+    # aws-lc-sys configures its C build with CMake. Only the CMake *tool* is
+    # wanted here: cargo owns the configure and build phases.
+    cmake
   ];
+
+  dontUseCmakeConfigure = true;
 
   buildInputs = [
+    # GPUI renderer, windowing and font backend.
+    fontconfig
+    freetype
+    libx11
+    libxcb
+    libxkbcommon
+    libxext
+    wayland
+    # Tray icon and native menu integration.
     gtk3
-    webkitgtk_4_1
-    libsoup_3
-    libappindicator-gtk3
+    glib
     libayatana-appindicator
-    librsvg
-    openssl
-    udev
+    # `keyring`'s sync-secret-service feature links libdbus through libdbus-sys.
+    # It resolves today only because gtk3 propagates at-spi2-core, which
+    # propagates dbus; name the input here instead of depending on that chain.
+    dbus
   ];
 
+  # Baked into `nyaterm_core::packaging` at compile time: the Nix package owns
+  # the update channel, so the application hides its in-app updater and reports
+  # the package manager in the About dialog instead of offering an update it
+  # cannot apply to a read-only /nix/store installation.
   NYATERM_PACKAGE_MANAGER = "nix";
   NYATERM_GITHUB_GIST_CLIENT_ID = lib.optionalString (githubGistClientId != null) githubGistClientId;
-
-  preBuild = ''
-    mkdir -p dist src-tauri/binaries
-    cp -r ${frontend}/. dist
-    cp ${mcpSidecar}/bin/nyaterm-mcp src-tauri/binaries/nyaterm-mcp
-    cp ${mcpSidecar}/bin/nyaterm-mcp src-tauri/binaries/nyaterm-mcp-${stdenv.hostPlatform.rust.rustcTarget}
-  '';
 
   desktopItems = [
     (makeDesktopItem {
       name = "nyaterm";
       desktopName = "NyaTerm";
-      comment = "A modern, high-performance SSH client and terminal workspace";
+      comment = "GPU-accelerated SSH client and terminal workspace";
       exec = "nyaterm %U";
       icon = "nyaterm";
-      categories = [ "System" "TerminalEmulator" ];
+      categories = [
+        "System"
+        "TerminalEmulator"
+      ];
       mimeTypes = [
         "x-scheme-handler/nyaterm"
         "x-scheme-handler/ssh"
@@ -151,28 +120,45 @@ rustPlatform.buildRustPackage {
     })
   ];
 
+  # `nyaterm` spawns nyaterm-mcp, nyaterm-rdp-helper and nyaterm-vnc-helper from
+  # its own directory, which is why all four binaries must stay in $out/bin.
+  # (crates/nyaterm-activex-helper is a default member too, but it only uses its
+  # Windows dependencies, so the Linux build installs no binary for it.)
   postInstall = ''
-    install -m 755 ${mcpSidecar}/bin/nyaterm-mcp $out/bin/nyaterm-mcp
-    install -Dm 644 ${nyaterm-src}/src-tauri/icons/32x32.png $out/share/icons/hicolor/32x32/apps/nyaterm.png
-    install -Dm 644 ${nyaterm-src}/src-tauri/icons/128x128.png $out/share/icons/hicolor/128x128/apps/nyaterm.png
-    install -Dm 644 ${nyaterm-src}/src-tauri/icons/128x128@2x.png $out/share/icons/hicolor/256x256/apps/nyaterm.png
+    install -Dm 644 ${icons}/32x32.png $out/share/icons/hicolor/32x32/apps/nyaterm.png
+    install -Dm 644 ${icons}/64x64.png $out/share/icons/hicolor/64x64/apps/nyaterm.png
+    install -Dm 644 ${icons}/128x128.png $out/share/icons/hicolor/128x128/apps/nyaterm.png
+    install -Dm 644 ${icons}/256x256.png $out/share/icons/hicolor/256x256/apps/nyaterm.png
+    install -Dm 644 ${icons}/512x512.png $out/share/icons/hicolor/512x512/apps/nyaterm.png
   '';
 
   preFixup = ''
     gappsWrapperArgs+=(
-      --prefix PATH : "${lib.makeBinPath [ xdg-utils desktop-file-utils ]}"
-      --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath [ libayatana-appindicator libappindicator-gtk3 ]}"
+      --prefix PATH : "${lib.makeBinPath [ xdg-utils ]}"
+      --prefix LD_LIBRARY_PATH : "${
+        lib.makeLibraryPath [
+          wayland
+          libxkbcommon
+          vulkan-loader
+          libayatana-appindicator
+        ]
+      }"
       --set-default SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt"
     )
   '';
 
+  # The upstream suite drives a live GPUI window and real SSH/WebDAV endpoints;
+  # it is not hermetic enough for the build sandbox. Upstream CI runs it.
   doCheck = false;
 
   meta = with lib; {
-    description = "A modern, high-performance SSH client built with Tauri and React";
+    description = "GPU-accelerated SSH client and terminal workspace";
     homepage = "https://nyaterm.app";
-    license = licenses.mit;
-    platforms = [ "x86_64-linux" "aarch64-linux" ];
+    license = licenses.asl20;
+    platforms = [
+      "x86_64-linux"
+      "aarch64-linux"
+    ];
     mainProgram = "nyaterm";
   };
 }

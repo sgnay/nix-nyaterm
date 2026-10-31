@@ -18,6 +18,11 @@ on:
       - ".github/workflows/nix.yml"
   workflow_dispatch:
 
+# Third-party actions are pinned to full commit SHAs: these jobs hold
+# `id-token: write` for the Magic Nix Cache OIDC login, so a retagged or
+# compromised release could otherwise execute code with that token. Bump the
+# SHA and its trailing version comment together.
+
 permissions:
   contents: read
   id-token: write # Magic Nix Cache OIDC login
@@ -33,19 +38,27 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v30
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
       - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v9
+        uses: DeterminateSystems/magic-nix-cache-action@6221693898146dc97e38ad0e013488a16477a4c4 # v9
 
+      # `--no-update-lock-file` turns a flake.lock that does not match flake.nix
+      # into an error instead of something Nix silently rewrites in the checkout.
+      # Every job here audits the committed lock, not a freshly resolved one.
       - name: Check flake outputs on supported systems
-        run: nix flake check --all-systems --no-build
+        run: nix flake check --all-systems --no-build --no-update-lock-file
+
+      # The updater decides which release the pin may move to; its regression
+      # cases run against stubbed git/nix, so they need neither network nor store.
+      - name: Test the updater's pin handling
+        run: ./scripts/tests/update-upstream-test.sh
 
   build:
     name: Build Linux (${{ matrix.target }})
@@ -53,6 +66,10 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      # Both runners are 4 vCPU / 16 GiB, and a single `nyaterm-desktop` rustc
+      # peaks above 10 GiB, so two concurrent rustc units can exceed the runner's
+      # memory. The package build is therefore serialized; the output check that
+      # follows replays the already-built package and keeps 2.
       matrix:
         include:
           - target: x86_64-linux
@@ -63,19 +80,23 @@ jobs:
             pkg: .#packages.aarch64-linux.nyaterm
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v30
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
       - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v9
+        uses: DeterminateSystems/magic-nix-cache-action@6221693898146dc97e38ad0e013488a16477a4c4 # v9
 
+      # Builds the committed pin exactly as users install it; no override, so the
+      # locked source and `cargoHash` are what CI proves. `--no-update-lock-file`
+      # keeps the revision that is built identical to the one in flake.lock: a
+      # stale lock fails here instead of being re-resolved behind the check.
       - name: Build NyaTerm package
-        run: nix build ${{ matrix.pkg }} -L
+        run: nix build ${{ matrix.pkg }} --cores 1 --no-update-lock-file -L
 
       - name: Verify package outputs
-        run: nix build .#checks.${{ matrix.target }}.nyaterm -L
+        run: nix build .#checks.${{ matrix.target }}.nyaterm --cores 2 --no-update-lock-file -L

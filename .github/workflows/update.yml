@@ -5,6 +5,11 @@ on:
     - cron: "17 3 * * 1"
   workflow_dispatch:
 
+# Third-party actions are pinned to full commit SHAs: these jobs hold
+# `id-token: write` for the Magic Nix Cache OIDC login, so a retagged or
+# compromised release could otherwise execute code with that token. Bump the
+# SHA and its trailing version comment together.
+
 # Baseline for any job below that does not declare its own block. A job-level
 # `permissions` key replaces this outright rather than merging with it, and an
 # unspecified scope becomes `none`.
@@ -29,18 +34,23 @@ jobs:
       id-token: write # Magic Nix Cache OIDC login
     outputs:
       pushed: ${{ steps.push.outputs.pushed }}
+    env:
+      # The updater builds the package itself. A single `nyaterm-desktop` rustc
+      # peaks above 10 GiB, so the package build is serialized here instead of
+      # sharing the runner's memory with a second rustc unit.
+      NIX_CONFIG: cores = 1
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v30
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
       - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v9
+        uses: DeterminateSystems/magic-nix-cache-action@6221693898146dc97e38ad0e013488a16477a4c4 # v9
 
       # actions/checkout configures credentials but no commit identity, and
       # --commit runs `git commit`, so this has to be set explicitly.
@@ -72,6 +82,67 @@ jobs:
           git push --force -u origin "$UPDATE_BRANCH"
           echo "pushed=true" >>"$GITHUB_OUTPUT"
 
+  # While the pin is a commit that no release tag contains, the `update` job
+  # exits before it builds anything, so nothing downstream runs. Without this job
+  # an unreachable revision would only be noticed on the next push.
+  #
+  # It builds the pin of the ref that triggered the run: a schedule always starts
+  # on the default branch, while `workflow_dispatch` starts on the ref it was
+  # invoked from.
+  #
+  # It stays separate from `verify`, which must be gated on `pushed` so it checks
+  # out the update branch.
+  verify-pin:
+    name: Build committed pin (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read # checkout and build only
+      id-token: write # Magic Nix Cache OIDC login
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux
+            os: ubuntu-latest
+          - target: aarch64-linux
+            os: ubuntu-24.04-arm
+    steps:
+      - name: Checkout triggering ref
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Fetch the locked revision directly from GitHub before Nix or any binary
+      # cache is configured, so a cached source/output cannot mask its deletion.
+      - name: Verify locked source revision is reachable
+        shell: bash
+        run: |
+          owner=$(jq -r '.nodes["nyaterm-src"].locked.owner' flake.lock)
+          repo=$(jq -r '.nodes["nyaterm-src"].locked.repo' flake.lock)
+          rev=$(jq -r '.nodes["nyaterm-src"].locked.rev' flake.lock)
+          [[ "$owner" =~ ^[A-Za-z0-9_.-]+$ && "$repo" =~ ^[A-Za-z0-9_.-]+$ && "$rev" =~ ^[0-9a-f]{40}$ ]]
+          tmp=$(mktemp -d "$RUNNER_TEMP/nyaterm-pin.XXXXXX")
+          git init --quiet "$tmp"
+          git -C "$tmp" fetch --no-tags --depth=1 "https://github.com/${owner}/${repo}.git" "$rev"
+          fetched=$(git -C "$tmp" rev-parse FETCH_HEAD)
+          test "$fetched" = "$rev"
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@6221693898146dc97e38ad0e013488a16477a4c4 # v9
+
+      # The output check pulls in the package, so this is the same build users
+      # install. It is a cache hit unless the pin moved. `--no-update-lock-file`
+      # is what makes this step mean what it says: without it Nix would re-lock a
+      # `flake.nix` pin that `flake.lock` does not match, build a revision the
+      # reachability step above never fetched, and leave the checkout dirty.
+      - name: Build and verify package outputs
+        run: nix build .#checks.${{ matrix.target }}.nyaterm --cores 1 --no-update-lock-file -L
+
   verify:
     name: Build Linux (${{ matrix.target }})
     needs: update
@@ -83,6 +154,10 @@ jobs:
       id-token: write # Magic Nix Cache OIDC login
     strategy:
       fail-fast: false
+      # Both runners are 4 vCPU / 16 GiB, and a single `nyaterm-desktop` rustc
+      # peaks above 10 GiB, so two concurrent rustc units can exceed the runner's
+      # memory. The package build is therefore serialized; the output check that
+      # follows replays the already-built package and keeps 2.
       matrix:
         include:
           - target: x86_64-linux
@@ -91,27 +166,29 @@ jobs:
             os: ubuntu-24.04-arm
     steps:
       - name: Checkout update branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.UPDATE_BRANCH }}
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v30
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
       - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v9
+        uses: DeterminateSystems/magic-nix-cache-action@6221693898146dc97e38ad0e013488a16477a4c4 # v9
 
       # Built here because a PR opened with GITHUB_TOKEN does not trigger the
-      # pull_request branch of nix.yml, so that matrix never runs for it.
+      # pull_request branch of nix.yml, so that matrix never runs for it. The
+      # script refreshed flake.lock before pushing, so a stale lock fails here
+      # rather than being re-resolved under the PR.
       - name: Build NyaTerm package
-        run: nix build .#nyaterm -L
+        run: nix build .#nyaterm --cores 1 --no-update-lock-file -L
 
       - name: Verify package outputs
-        run: nix build .#checks.${{ matrix.target }}.nyaterm -L
+        run: nix build .#checks.${{ matrix.target }}.nyaterm --cores 2 --no-update-lock-file -L
 
   open-pr:
     name: Open pull request
@@ -127,7 +204,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout update branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.UPDATE_BRANCH }}
           persist-credentials: false
