@@ -63,7 +63,12 @@ jobs:
   build:
     name: Build Linux (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # A full from-source build of the workspace takes 85-95 minutes on a 4 vCPU
+    # runner: the binary cache only covers a recent build, so most pushes compile
+    # the dependency graph again. A 90 minute budget cancelled a run that was still
+    # compiling, and a timed-out job reports "cancelled", which reads like a flake
+    # rather than a slow build.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       # Both runners are 4 vCPU / 16 GiB, and a single `nyaterm-desktop` rustc

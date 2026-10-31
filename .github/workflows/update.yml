@@ -28,7 +28,10 @@ jobs:
   update:
     name: Bump pinned NyaTerm release
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Same budget as nix.yml: these jobs build the package from source, which takes
+    # 85-95 minutes on a 4 vCPU runner, so a tighter cap turns a slow build into an
+    # apparent cancellation.
+    timeout-minutes: 150
     permissions:
       contents: write # pushes the update branch
       id-token: write # Magic Nix Cache OIDC login
@@ -95,7 +98,10 @@ jobs:
   verify-pin:
     name: Build committed pin (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # Same budget as nix.yml: these jobs build the package from source, which takes
+    # 85-95 minutes on a 4 vCPU runner, so a tighter cap turns a slow build into an
+    # apparent cancellation.
+    timeout-minutes: 150
     permissions:
       contents: read # checkout and build only
       id-token: write # Magic Nix Cache OIDC login
@@ -148,7 +154,10 @@ jobs:
     needs: update
     if: needs.update.outputs.pushed == 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # Same budget as nix.yml: these jobs build the package from source, which takes
+    # 85-95 minutes on a 4 vCPU runner, so a tighter cap turns a slow build into an
+    # apparent cancellation.
+    timeout-minutes: 150
     permissions:
       contents: read # checkout and build only; never pushes
       id-token: write # Magic Nix Cache OIDC login
