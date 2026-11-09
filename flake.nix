@@ -14,7 +14,7 @@
     #     github:nyakang/nyaterm/main --no-write-lock-file
     #   nix build .#nyaterm --override-input nyaterm-src path:/path/to/nyaterm
     nyaterm-src = {
-      url = "github:nyakang/nyaterm/v2.0.2";
+      url = "github:nyakang/nyaterm/v2.0.4";
       flake = false;
     };
   };

@@ -61,7 +61,7 @@ rustPlatform.buildRustPackage {
   # dependencies (gpui, russh, IronRDP, ...) whose trees have no checksum in the
   # lock file, so the vendored sources are fetched as one fixed-output
   # derivation. scripts/update-upstream.sh adopts the hash Nix reports.
-  cargoHash = "sha256-9SlgUwi6jwN1jqPKhkKjHbvY6k1xdEUZ4TyfAHPYSLY=";
+  cargoHash = "sha256-e71MwdXp/UNqpiQOCvdcxq5HB5aJPXxNII1vFOgvWSw=";
 
   nativeBuildInputs = [
     pkg-config
